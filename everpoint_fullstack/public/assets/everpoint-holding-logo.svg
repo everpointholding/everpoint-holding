@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 120" width="620" height="120"
+     role="img" aria-label="Ever Point Holding">
+  <g transform="translate(24,15) scale(1.40625)" fill="none"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M40.89 7.57 A26 26 0 1 0 56.43 23.11" stroke="#14304F" stroke-width="3.2"/>
+    <path d="M17 47.5 H47" stroke="#14304F" stroke-width="3"/>
+    <g fill="#14304F" stroke="none">
+      <rect x="20" y="36" width="5" height="11" rx="2"/>
+      <rect x="29" y="31" width="5" height="16" rx="2"/>
+      <rect x="38" y="26" width="5" height="21" rx="2"/>
+    </g>
+    <path d="M22.5 30 L31.5 25 L40.5 20 L50 13" stroke="#2E7D77" stroke-width="3"/>
+    <path d="M47.2 19.4 L50 13 L43 13.8"        stroke="#2E7D77" stroke-width="3"/>
+  </g>
+  <g font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+    <text x="134" y="58" font-size="38" letter-spacing="0.5">
+      <tspan font-weight="600" fill="#14304F">EVERPOINT</tspan><tspan font-weight="300" fill="#4A6076"> HOLDING</tspan>
+    </text>
+    <text x="136" y="85" font-size="11.5" font-weight="500"
+          letter-spacing="2.8" fill="#4A6076">LOGISTICS · DATA ANALYTICS · BOOKKEEPING</text>
+  </g>
+</svg>
