@@ -12,7 +12,7 @@
     {
       "binding": "DB",
       "database_name": "everpoint-holding",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+      "database_id": "05ba2650-149e-4613-a98f-990a8d7f5b36"
     }
   ],
   "vars": {
