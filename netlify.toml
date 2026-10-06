@@ -1,0 +1,6 @@
+[build]
+  base = "everpoint_fullstack"
+  publish = "public"
+
+[functions]
+  directory = "netlify/functions"
