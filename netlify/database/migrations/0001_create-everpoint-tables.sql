@@ -1,5 +1,3 @@
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS admins (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
@@ -49,41 +47,38 @@ CREATE TABLE IF NOT EXISTS applications (
 
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
-  employee_id TEXT NOT NULL,
-  sender TEXT NOT NULL CHECK(sender IN ('employee','admin')),
+  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  sender TEXT NOT NULL CHECK (sender IN ('employee','admin')),
   text TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
-  audience TEXT NOT NULL CHECK(audience IN ('admin','employee')),
-  employee_id TEXT,
+  audience TEXT NOT NULL CHECK (audience IN ('admin','employee')),
+  employee_id TEXT REFERENCES employees(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   body TEXT NOT NULL,
   is_read INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS uploads (
   id TEXT PRIMARY KEY,
-  employee_id TEXT NOT NULL,
+  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   related TEXT NOT NULL,
   file_name TEXT NOT NULL,
   object_key TEXT NOT NULL UNIQUE,
   size INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'Submitted',
-  created_at TEXT NOT NULL,
-  FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   token_hash TEXT NOT NULL UNIQUE,
-  kind TEXT NOT NULL CHECK(kind IN ('admin','employee')),
+  kind TEXT NOT NULL CHECK (kind IN ('admin','employee')),
   subject_id TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   created_at TEXT NOT NULL

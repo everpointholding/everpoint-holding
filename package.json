@@ -1,0 +1,13 @@
+{
+  "name": "everpoint-holding",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "netlify dev"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.1.3",
+    "@netlify/database": "^2.0.1"
+  }
+}
