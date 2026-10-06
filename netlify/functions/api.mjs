@@ -1,3 +1,6 @@
+import { getDatabase } from '@netlify/database';
+import { getStore } from '@netlify/blobs';
+
 const DOCS = [
   {id:'profile',title:'Company Profile',desc:'EverPoint Holding company profile.',url:'documents/Company Profile.pdf'},
   {id:'offer',title:'EverPointHolding-Offer-Letter',desc:'Employment offer letter.',url:'documents/EverPointHolding-Offer-Letter.pdf'},
@@ -13,6 +16,7 @@ const SESSION_COOKIE = 'ep_session';
 const encoder = new TextEncoder();
 
 function json(data, status=200, headers={}) {
+  if(typeof status==='object'){ headers=status.headers||{}; status=status.status||200; }
   return new Response(JSON.stringify(data), {status, headers:{'content-type':'application/json; charset=utf-8', ...headers}});
 }
 function ok(data){ return json(data); }
@@ -71,24 +75,14 @@ async function listAdminData(env){
   return {employees:emps.results.map(publicEmployee),applications:apps.results,notifications:notifs.results,docs:DOCS,steps:STEPS};
 }
 
-function supabaseConfig(env){
-  const base=String(env.SUPABASE_URL||'').replace(/\/$/,'');
-  const key=String(env.SUPABASE_SECRET_KEY||'');
-  if(!base||!key) throw new Error('Supabase Storage is not configured.');
-  return {base,key};
+// Private employee PDF uploads are stored in Netlify Blobs; upload metadata lives in the database.
+function uploadStore(){ return getStore('employee-documents'); }
+async function storeUpload(keyPath,file){
+  await uploadStore().set(keyPath,await file.arrayBuffer(),{metadata:{contentType:'application/pdf',fileName:file.name}});
 }
-async function supabaseUpload(env,keyPath,file){
-  const {base,key}=supabaseConfig(env);
-  const r=await fetch(`${base}/storage/v1/object/employee-documents/${keyPath}`,{
-    method:'POST',headers:{authorization:`Bearer ${key}`,apikey:key,'content-type':'application/pdf','x-upsert':'false'},body:file.stream()
-  });
-  if(!r.ok){const t=await r.text();throw new Error(`Supabase upload failed (${r.status}): ${t.slice(0,300)}`)}
-}
-async function supabaseDownload(env,keyPath){
-  const {base,key}=supabaseConfig(env);
-  const r=await fetch(`${base}/storage/v1/object/employee-documents/${keyPath}`,{headers:{authorization:`Bearer ${key}`,apikey:key}});
-  if(!r.ok)return null;
-  return r;
+async function fetchUpload(keyPath){
+  const data=await uploadStore().get(keyPath,{type:'arrayBuffer'});
+  return data?{body:data}:null;
 }
 
 async function api(request,env,url){
@@ -150,10 +144,10 @@ async function api(request,env,url){
     const s=await requireEmployee(env,request); if(!s)return fail('Not signed in.',401); const rows=await env.DB.prepare('SELECT id,title,related,file_name,size,status,created_at FROM uploads WHERE employee_id=? ORDER BY created_at DESC').bind(s.subject_id).all(); return ok({uploads:rows.results});
   }
   if(path==='/api/employee/uploads' && method==='POST'){
-    const s=await requireEmployee(env,request); if(!s)return fail('Not signed in.',401); const form=await request.formData(); const file=form.get('file'); const title=String(form.get('title')||'').trim(); const related=String(form.get('related')||'Other'); if(!(file instanceof File))return fail('PDF file is required.'); if(file.type!=='application/pdf')return fail('Only PDF files are accepted.'); if(file.size>15*1024*1024)return fail('PDF must be 15 MB or smaller.'); if(!title)return fail('Document title is required.'); const uploadId=id('upl'), key=`employees/${s.subject_id}/${uploadId}.pdf`; await supabaseUpload(env,key,file); await env.DB.prepare('INSERT INTO uploads (id,employee_id,title,related,file_name,object_key,size,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(uploadId,s.subject_id,title,related,file.name,key,file.size,'Submitted',now()).run(); const emp=await env.DB.prepare('SELECT name FROM employees WHERE id=?').bind(s.subject_id).first(); await notifyAdmin(env,'New PDF uploaded',`${emp?.name||'Employee'} uploaded “${title}”.`); return ok({ok:true});
+    const s=await requireEmployee(env,request); if(!s)return fail('Not signed in.',401); const form=await request.formData(); const file=form.get('file'); const title=String(form.get('title')||'').trim(); const related=String(form.get('related')||'Other'); if(!(file instanceof File))return fail('PDF file is required.'); if(file.type!=='application/pdf')return fail('Only PDF files are accepted.'); if(file.size>15*1024*1024)return fail('PDF must be 15 MB or smaller.'); if(!title)return fail('Document title is required.'); const uploadId=id('upl'), key=`employees/${s.subject_id}/${uploadId}.pdf`; await storeUpload(key,file); await env.DB.prepare('INSERT INTO uploads (id,employee_id,title,related,file_name,object_key,size,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(uploadId,s.subject_id,title,related,file.name,key,file.size,'Submitted',now()).run(); const emp=await env.DB.prepare('SELECT name FROM employees WHERE id=?').bind(s.subject_id).first(); await notifyAdmin(env,'New PDF uploaded',`${emp?.name||'Employee'} uploaded “${title}”.`); return ok({ok:true});
   }
   if(path.startsWith('/api/employee/uploads/') && method==='GET'){
-    const s=await requireEmployee(env,request); if(!s)return fail('Not signed in.',401); const uid=path.split('/').pop(); const row=await env.DB.prepare('SELECT * FROM uploads WHERE id=? AND employee_id=?').bind(uid,s.subject_id).first(); if(!row)return fail('File not found.',404); const obj=await supabaseDownload(env,row.object_key); if(!obj)return fail('File not found.',404); return new Response(obj.body,{headers:{'content-type':'application/pdf','content-disposition':`attachment; filename="${row.file_name.replaceAll('\"','')}"`}});
+    const s=await requireEmployee(env,request); if(!s)return fail('Not signed in.',401); const uid=path.split('/').pop(); const row=await env.DB.prepare('SELECT * FROM uploads WHERE id=? AND employee_id=?').bind(uid,s.subject_id).first(); if(!row)return fail('File not found.',404); const obj=await fetchUpload(row.object_key); if(!obj)return fail('File not found.',404); return new Response(obj.body,{headers:{'content-type':'application/pdf','content-disposition':`attachment; filename="${row.file_name.replaceAll('\"','')}"`}});
   }
 
   if(path==='/api/admin/login' && method==='POST'){
@@ -187,20 +181,33 @@ async function api(request,env,url){
   if(path.startsWith('/api/admin/chat/') && method==='GET'){if(!await requireAdmin(env,request))return fail('Not signed in.',401);const eid=path.split('/').pop();const rows=await env.DB.prepare('SELECT id,sender,text,created_at FROM messages WHERE employee_id=? ORDER BY created_at ASC').bind(eid).all();return ok({messages:rows.results});}
   if(path.startsWith('/api/admin/chat/') && method==='POST'){if(!await requireAdmin(env,request))return fail('Not signed in.',401);const eid=path.split('/')[4];const emp=await env.DB.prepare('SELECT name,chat_enabled FROM employees WHERE id=?').bind(eid).first();if(!emp)return fail('Employee not found.',404);if(!emp.chat_enabled)return fail('Chat is locked.',403);const b=await request.json().catch(()=>({}));const text=String(b.text||'').trim();if(!text||text.length>1000)return fail('Message must be 1–1000 characters.');await env.DB.prepare('INSERT INTO messages (id,employee_id,sender,text,created_at) VALUES (?,?,?,?,?)').bind(id('msg'),eid,'admin',text,now()).run();await notifyEmployee(env,eid,'New message from EverPoint Admin','You have a new support message from the administrator.');return ok({ok:true});}
   if(path==='/api/admin/uploads' && method==='GET'){if(!await requireAdmin(env,request))return fail('Not signed in.',401);const rows=await env.DB.prepare('SELECT u.id,u.employee_id,u.title,u.related,u.file_name,u.size,u.status,u.created_at,e.name employee_name FROM uploads u JOIN employees e ON e.id=u.employee_id ORDER BY u.created_at DESC').all();return ok({uploads:rows.results});}
-  if(path.startsWith('/api/admin/uploads/') && method==='GET'){if(!await requireAdmin(env,request))return fail('Not signed in.',401);const row=await env.DB.prepare('SELECT * FROM uploads WHERE id=?').bind(path.split('/').pop()).first();if(!row)return fail('File not found.',404);const obj=await supabaseDownload(env,row.object_key);if(!obj)return fail('File not found.',404);return new Response(obj.body,{headers:{'content-type':'application/pdf','content-disposition':`attachment; filename="${row.file_name.replaceAll('"','')}"`}});}
+  if(path.startsWith('/api/admin/uploads/') && method==='GET'){if(!await requireAdmin(env,request))return fail('Not signed in.',401);const row=await env.DB.prepare('SELECT * FROM uploads WHERE id=?').bind(path.split('/').pop()).first();if(!row)return fail('File not found.',404);const obj=await fetchUpload(row.object_key);if(!obj)return fail('File not found.',404);return new Response(obj.body,{headers:{'content-type':'application/pdf','content-disposition':`attachment; filename="${row.file_name.replaceAll('"','')}"`}});}
   if(path==='/api/admin/credentials' && method==='PUT'){
     const s=await requireAdmin(env,request);if(!s)return fail('Not signed in.',401);const b=await request.json().catch(()=>({}));const row=await env.DB.prepare('SELECT * FROM admins WHERE id=?').bind(s.subject_id).first();if(!row)return fail('Admin not found.',404);if(!(await verifyPassword(String(b.currentPassword||''),row.password_salt,row.password_hash)))return fail('Current password is incorrect.',401);const email=String(b.email||row.email).trim().toLowerCase(),password=String(b.newPassword||'');if(!/^\S+@\S+\.\S+$/.test(email)||password.length<12)return fail('Use a valid email and a new password of at least 12 characters.');const ph=await passwordHash(password);await env.DB.prepare('UPDATE admins SET email=?,password_salt=?,password_hash=?,updated_at=? WHERE id=?').bind(email,ph.salt,ph.hash,now(),s.subject_id).run();await env.DB.prepare('DELETE FROM sessions WHERE kind=\'admin\' AND id<>?').bind(s.id).run();return ok({ok:true,email});
   }
   return null;
 }
 
-export default {
-  async fetch(request,env){
-    const url=new URL(request.url);
-    if(url.pathname.startsWith('/api/')){
-      try{ const r=await api(request,env,url); return r||fail('API route not found.',404); }
-      catch(err){ console.error(err); return fail('Server error. Please try again.',500); }
-    }
-    return env.ASSETS.fetch(request);
-  }
+// Small D1-style adapter over Netlify Database (Postgres) so the route handlers keep their original SQL.
+function d1(pool){
+  const prepare=(sql)=>{
+    let n=0; const text=sql.replace(/\?/g,()=>`$${++n}`);
+    const stmt=(params)=>({
+      bind:(...p)=>stmt(p),
+      async first(){ const r=await pool.query(text,params); return r.rows[0]||null; },
+      async all(){ const r=await pool.query(text,params); return {results:r.rows}; },
+      async run(){ const r=await pool.query(text,params); return {meta:{changes:r.rowCount}}; }
+    });
+    return stmt([]);
+  };
+  return {prepare};
+}
+
+export default async (request) => {
+  const url=new URL(request.url);
+  const env={DB:d1(getDatabase().pool),SETUP_TOKEN:Netlify.env.get('SETUP_TOKEN'),SESSION_DAYS:Netlify.env.get('SESSION_DAYS')||'7'};
+  try{ const r=await api(request,env,url); return r||fail('API route not found.',404); }
+  catch(err){ console.error(err); return fail('Server error. Please try again.',500); }
 };
+
+export const config = { path: '/api/*' };
